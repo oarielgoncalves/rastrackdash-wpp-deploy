@@ -4839,13 +4839,26 @@ export class MetaReportingService {
 
     const activeAccount = await this.prisma.metaReportingAccount.findFirst({
       where: { workspaceId, adAccountId, active: true },
-      select: { id: true },
+      select: { id: true, businessConnectionId: true },
     });
 
     if (!activeAccount) {
       throw new BadRequestException(
         "A conta de anúncios precisa estar ativa antes desta alteração",
       );
+    }
+
+    // Accounts on a normalized connection have no legacy MetaIntegration row:
+    // use the same credential that already syncs this account's reports.
+    if (activeAccount.businessConnectionId && this.connectionResolver) {
+      const route = await this.connectionResolver.resolveReportingRoute({
+        workspaceId,
+        reportingAccountId: activeAccount.id,
+        adAccountId,
+        businessConnectionId: activeAccount.businessConnectionId,
+      });
+
+      return route.accessToken;
     }
 
     const connection = await this.getConnection(workspaceId);
