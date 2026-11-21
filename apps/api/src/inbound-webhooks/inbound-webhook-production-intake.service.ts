@@ -11,6 +11,9 @@ import { ctwaDestinationProviderValues } from "./authorized-ctwa-destination";
 
 export const INBOUND_WEBHOOK_PRODUCTION_RECOVERY_TTL_MS = 5 * 60 * 1_000;
 export const INBOUND_WEBHOOK_PRODUCTION_RECOVERY_BATCH_SIZE = 100;
+/** Meta rejects events older than 7 days; stop one day earlier as a margin. */
+export const INBOUND_WEBHOOK_RESOLVED_EVENT_RECOVERY_WINDOW_MS =
+  6 * 24 * 60 * 60 * 1_000;
 
 export type InboundWebhookProductionEnqueueResult = {
   eligible: number;
@@ -184,8 +187,53 @@ export class InboundWebhookProductionIntakeService {
     result.eligible = items.length;
 
     await this.enqueueItems(items, result);
+    await this.recoverResolvedEventsWithoutItem(now, result);
     await this.recoverProviderConversions(result);
     return result;
+  }
+
+  /**
+   * An entry whose ad was not synced yet is stored as unresolved. The next
+   * Meta sync re-evaluates it to resolved, but that path never creates the
+   * production item, so the lead would be lost. Maintenance picks those up.
+   */
+  private async recoverResolvedEventsWithoutItem(
+    now: Date,
+    result: InboundWebhookProductionEnqueueResult,
+  ): Promise<void> {
+    const deliveries = await this.prisma.inboundWebhookEvent.findMany({
+      where: {
+        classification: "eligible_route_resolved",
+        hasCtwa: true,
+        occurredAt: {
+          gte: new Date(
+            now.getTime() - INBOUND_WEBHOOK_RESOLVED_EVENT_RECOVERY_WINDOW_MS,
+          ),
+        },
+        replayItem: null,
+        productionItem: null,
+        delivery: { status: "processed" },
+        connection: { status: "production", removedAt: null },
+        channel: { status: "active" },
+      },
+      select: { workspaceId: true, connectionId: true, deliveryId: true },
+      distinct: ["deliveryId"],
+      orderBy: [{ deliveryId: "asc" }],
+      take: INBOUND_WEBHOOK_PRODUCTION_RECOVERY_BATCH_SIZE,
+    });
+
+    for (const delivery of deliveries) {
+      try {
+        const recovered = await this.enqueueDelivery(delivery);
+        result.eligible += recovered.eligible;
+        result.persisted += recovered.persisted;
+        result.queued += recovered.queued;
+        result.existing += recovered.existing;
+        result.queueFailures += recovered.queueFailures;
+      } catch {
+        result.queueFailures += 1;
+      }
+    }
   }
 
   private async recoverProviderConversions(

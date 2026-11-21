@@ -127,6 +127,7 @@ describe("wildcard CTWA dispatch and retained history", () => {
     h.prisma.inboundWebhookProductionItem.findMany.mockResolvedValue([
       { id: "item", workspaceId: "ws" },
     ]);
+    h.prisma.inboundWebhookEvent.findMany.mockResolvedValue([]);
     expect(await h.intake.recoverPendingItems()).toMatchObject({
       eligible: 1,
       queued: 1,
