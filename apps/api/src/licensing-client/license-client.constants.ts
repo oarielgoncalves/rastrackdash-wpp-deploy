@@ -12,3 +12,10 @@ export const LICENSE_GRACE_WINDOW_MS = 72 * 60 * 60 * 1000;
 
 export const LICENSE_HEARTBEAT_QUEUE = "license-heartbeat";
 export const LICENSE_HEARTBEAT_JOB_NAME = "license-heartbeat-tick";
+
+/**
+ * Every install ticks on the same 00/06/12/18 UTC boundary, and the server
+ * answered those heartbeats with 429. Each tick waits a random delay up to
+ * this value so requests stop landing in the same second.
+ */
+export const LICENSE_HEARTBEAT_MAX_JITTER_MS = 20 * 60 * 1000;

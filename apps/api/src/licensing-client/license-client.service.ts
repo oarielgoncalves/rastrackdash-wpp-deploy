@@ -173,6 +173,19 @@ export class LicenseClientService {
       // response is allowed to set status to "blocked".
       const message = error instanceof Error ? error.message : "unknown_license_heartbeat_error";
       this.logger.warn(`license_heartbeat_error:${message}`);
+
+      // The server answered every heartbeat with 429 for days while activation
+      // kept working, so the cache expired and the install locked. Renew via
+      // the same key's activation before falling back to grace.
+      if (this.env.LICENSE_ACCOUNT_IDENTITY?.trim()) {
+        try {
+          const renewed = await this.activate();
+          this.logger.log("license_heartbeat_renewed_by_activation");
+          return renewed;
+        } catch {
+          // activate() already logged; keep the heartbeat error below.
+        }
+      }
       if (existing) {
         await this.prisma.licenseState.update({
           where: { id: LICENSE_STATE_ID },
